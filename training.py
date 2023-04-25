@@ -11,7 +11,7 @@ from torch.optim import Adam, AdamW, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
 from torch.utils.tensorboard import SummaryWriter
 
-from models.model import ResNet18Model, Encoder, TinySwin, SmallSwin, LargeSwin
+from models.model import ResNet18Model, TinySwin, SmallSwin, LargeSwin
 from utils.logconf import logging
 from utils.data_loader import get_cifar10_dl
 from utils.ops import aug_image
@@ -86,8 +86,6 @@ class TinyImageNetTrainingApp:
     def initModel(self):
         if self.args.model_name == 'resnet':
             model = ResNet18Model(num_classes=10)
-        elif self.args.model_name == 'unet':
-            model = Encoder(num_classes=10)
         elif self.args.model_name == 'swint':
             model = TinySwin(num_classes=10, pretrained=self.args.pretrained)
         elif self.args.model_name == 'swins':
