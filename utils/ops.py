@@ -41,13 +41,13 @@ def aug_flip_resized_crop(batch):
     flip = random.choice([True, False])
     if flip:
         batch = functional.hflip(batch)
-    resized_crop = RandomResizedCrop(64)
+    resized_crop = RandomResizedCrop(32)
     batch = resized_crop(batch)
 
 def aug_crop_rotate_flip_erase(batch):
     trans = Compose([
         Pad(4),
-        RandomCrop(64),
+        RandomCrop(32),
         RandomHorizontalFlip(p=0.25),
         RandomApply(torch.nn.ModuleList([
             RandomRotation(degrees=15)

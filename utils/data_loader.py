@@ -1,99 +1,108 @@
-import os
+from collections import defaultdict
+import random
 
-import h5py
 import numpy as np
-import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
+from torchvision.datasets import CIFAR10
+from torchvision.transforms import Compose, ToTensor, Normalize
 
-data_path = 'data'
+data_path = 'data/'
 
-class ImageNetDataSet(Dataset):
-    def __init__(self, data_path, mode, site=None, site_number=None):
-        super().__init__()
-        h5_file = h5py.File(os.path.join(data_path, 'tiny_imagenet_{}.hdf5'.format(mode)), 'r')
-        self.image_ds = h5_file['data']
-        if mode != 'tst':
-            self.labels = h5_file['labels']
-        if site is not None:
-            self.image_ds = self.image_ds[site * 20000: (site + 1) * 20000]
-            self.labels = self.labels[site * 20000: (site + 1) * 20000]
-        if site_number is not None:
-            self.site_number = site_number
-            self.image_per_site = self.image_ds.shape[0] // site_number
+def get_cifar10_datasets():
+    train_mean = [0.4914, 0.4822, 0.4465]
+    train_std = [0.2470, 0.2435, 0.2616]
+    train_transform = Compose([ToTensor(), Normalize(train_mean, train_std)])
+    val_mean = [0.4942, 0.4851, 0.4504]
+    val_std = [0.2467, 0.2429, 0.2616]
+    val_transform = Compose([ToTensor(), Normalize(val_mean, val_std)])
 
-    def __len__(self):
-        if hasattr(self, 'site_number'):
-            length = self.image_per_site
-        else:
-            length = self.image_ds.shape[0]
-        return length
+    dataset = CIFAR10(root=data_path, train=True, download=True, transform=train_transform)
+    val_dataset = CIFAR10(root=data_path, train=False, download=True, transform=val_transform)
 
-    def __getitem__(self, index):
-        if hasattr(self, 'site_number'):
-            indices = []
-            for i in range(self.site_number):
-                indices.append(i * self.image_per_site + index)
-            images_np = np.array([self.image_ds[ndx] for ndx in indices])
-            images = torch.from_numpy(images_np).permute(0, 3, 1, 2)
-            labels_np = np.array([self.labels[ndx] for ndx in indices])
-            labels = torch.from_numpy(labels_np)
+    return dataset, val_dataset
 
-            return images, labels
-        else:
-            image_np = np.array(self.image_ds[index])
-            image = torch.from_numpy(image_np).permute(2, 0, 1)
+def get_cifar10_dl(partition, n_sites, batch_size):
+    if partition == 'regular':
+        dataset, val_dataset = get_cifar10_datasets()
 
-            if self.labels is not None:
-                label_np = np.array(self.labels[index])
-                label = torch.from_numpy(label_np)
-                return image, label
-            else:
-                return image
+    train_dl = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+    val_dl = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+    return train_dl, val_dl
 
-# class MultiSiteDataSet(Dataset):
-#     def __init__(self, data_path, mode, site_number=5):
-#         super().__init__()
-#         h5_file = h5py.File(os.path.join(data_path, 'tiny_imagenet_{}.hdf5'.format(mode)), 'r')
-#         self.image_ds = h5_file['data']
-#         self.labels = h5_file['labels']
-#         self.site_number = site_number
-#         self.image_per_site = self.image_ds.shape[0] // site_number
+def partition_data(dataset_name, partition, n_sites):
 
-#     def __len__(self):
-#         return self.image_per_site
-    
-#     def __getitem__(self, index):
-#         indices = []
-#         for i in range(self.site_number):
-#             indices.append(i * self.image_per_site + index)
-#         images_np = np.array([self.image_ds[ndx] for ndx in indices])
-#         images = torch.from_numpy(images_np).permute(0, 3, 1, 2)
-#         labels_np = np.array([self.labels[ndx] for ndx in indices])
-#         labels = torch.from_numpy(labels_np)
+    if dataset_name == 'cifar10':
+        cifar10_train_ds, cifar10_test_ds = get_cifar10_datasets()
+        X_train, y_train = cifar10_train_ds.data, cifar10_train_ds.target
+        X_test, y_test = cifar10_test_ds.data, cifar10_test_ds.target
 
-#         return images, labels
+    if partition == 'equal':
+        if dataset_name == "cifar10":
+            num = 2
+            K = 10
+        elif dataset_name == "cifar100":
+            num = 10
+            K = 100
 
-def get_trn_loader(batch_size, device, site=None):
-    trn_dataset = ImageNetDataSet(data_path=data_path, mode='trn', site=site)
-    train_loader = DataLoader(trn_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8)
-    return train_loader
+        # -------------------------------------------#
+        # Divide classes + num samples for each user #
+        # -------------------------------------------#
+        assert (num * n_sites) % K == 0, "equal classes appearance is needed"
+        count_per_class = (num * n_sites) // K
+        class_dict = {}
+        for i in range(K):
+            # sampling alpha_i_c
+            probs = np.random.uniform(0.4, 0.6, size=count_per_class)
+            # normalizing
+            probs_norm = (probs / probs.sum()).tolist()
+            class_dict[i] = {'count': count_per_class, 'prob': probs_norm}
 
-def get_multi_site_trn_loader(batch_size, site_number):
-    trn_dataset = ImageNetDataSet(data_path=data_path, mode='trn', site_number=site_number)
-    train_loader = DataLoader(trn_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8)
-    return train_loader
+        # -------------------------------------#
+        # Assign each client with data indexes #
+        # -------------------------------------#
+        class_partitions = defaultdict(list)
+        for i in range(n_sites):
+            c = []
+            for _ in range(num):
+                class_counts = [class_dict[i]['count'] for i in range(K)]
+                max_class_counts = np.where(np.array(class_counts) == max(class_counts))[0]
+                c.append(np.random.choice(max_class_counts))
+                class_dict[c[-1]]['count'] -= 1
+            class_partitions['class'].append(c)
+            class_partitions['prob'].append([class_dict[i]['prob'].pop() for i in c])
 
-def get_val_loader(batch_size, device):
-    val_dataset = ImageNetDataSet(data_path=data_path, mode='val')
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=8)
-    return val_loader
+        # -------------------------- #
+        # Create class index mapping #
+        # -------------------------- #
+        data_class_idx_train = {i: np.where(y_train == i)[0] for i in range(K)}
+        data_class_idx_test = {i: np.where(y_test == i)[0] for i in range(K)}
 
-def get_multi_site_val_loader(batch_size, site_number):
-    val_dataset = ImageNetDataSet(data_path=data_path, mode='val', site_number=site_number)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=8)
-    return val_loader
+        num_samples_train = {i: len(data_class_idx_train[i]) for i in range(K)}
+        num_samples_test = {i: len(data_class_idx_test[i]) for i in range(K)}
 
-def get_tst_loader(batch_size, device):
-    tst_dataset = ImageNetDataSet(data_path=data_path, mode='tst')
-    test_loader = DataLoader(tst_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=8)
-    return test_loader
+        # --------- #
+        # Shuffling #
+        # --------- #
+        for data_idx in data_class_idx_train.values():
+            random.shuffle(data_idx)
+        for data_idx in data_class_idx_test.values():
+            random.shuffle(data_idx)
+
+        # ------------------------------ #
+        # Assigning samples to each user #
+        # ------------------------------ #
+        net_dataidx_map_train ={i:np.ndarray(0,dtype=np.int64) for i in range(n_sites)}
+        net_dataidx_map_test ={i:np.ndarray(0,dtype=np.int64) for i in range(n_sites)}
+
+        for usr_i in range(n_sites):
+            for c, p in zip(class_partitions['class'][usr_i], class_partitions['prob'][usr_i]):
+                end_idx_train = int(num_samples_train[c] * p)
+                end_idx_test = int(num_samples_test[c] * p)
+
+                net_dataidx_map_train[usr_i] = np.append(net_dataidx_map_train[usr_i], data_class_idx_train[c][:end_idx_train])
+                net_dataidx_map_test[usr_i] = np.append(net_dataidx_map_test[usr_i], data_class_idx_test[c][:end_idx_test])
+
+                data_class_idx_train[c] = data_class_idx_train[c][end_idx_train:]
+                data_class_idx_test[c] = data_class_idx_test[c][end_idx_test:]
+
+    return (X_train, y_train, X_test, y_test, net_dataidx_map_train, net_dataidx_map_test)
