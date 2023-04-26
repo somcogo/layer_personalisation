@@ -38,7 +38,7 @@ class TinyImageNetTrainingApp:
         parser.add_argument("--label_smoothing", default=0.0, type=float, help="label smoothing in Cross Entropy Loss")
         parser.add_argument("--T_max", default=1000, type=int, help="T_max in Cosine LR scheduler")
         parser.add_argument("--pretrained", default=False, type=bool, help="use pretrained model")
-        parser.add_argument("--aug_mode", default='standard', type=str, help="mode of data augmentation")
+        parser.add_argument("--aug_mode", default='segmentation', type=str, help="mode of data augmentation")
         parser.add_argument("--scheduler_mode", default=None, type=str, help="choice of LR scheduler")
         parser.add_argument("--save_model", default=False, type=bool, help="save models during training")
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')

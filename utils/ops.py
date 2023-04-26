@@ -13,18 +13,11 @@ from torchvision.transforms import (
      RandomRotation,
      RandomErasing)
 
-def aug_image(batch: torch.Tensor, mode, multi_training):
-    if multi_training:
-        n, b, c, h, w = batch.shape
-        batch = batch.reshape(-1, c, h, w)
-    if mode == 'standard':
+def aug_image(batch: torch.Tensor, mode):
+    if mode == 'segmentation':
         batch = aug_flip_rotate_scale(batch)
-    elif mode == 'random_resized_crop':
-        batch = aug_flip_resized_crop(batch)
-    elif mode == 'resnet':
+    elif mode == 'classification':
         batch = aug_crop_rotate_flip_erase(batch)
-    if multi_training:
-        batch = batch.reshape(n, b, c, h, w)
     return batch
 
 def aug_flip_rotate_scale(batch):
@@ -36,13 +29,6 @@ def aug_flip_rotate_scale(batch):
     batch = functional.rotate(batch, angle)
     batch = scale * batch
     return batch
-
-def aug_flip_resized_crop(batch):
-    flip = random.choice([True, False])
-    if flip:
-        batch = functional.hflip(batch)
-    resized_crop = RandomResizedCrop(32)
-    batch = resized_crop(batch)
 
 def aug_crop_rotate_flip_erase(batch):
     trans = Compose([
