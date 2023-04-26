@@ -11,7 +11,7 @@ from torch.optim import Adam, AdamW, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
 from torch.utils.tensorboard import SummaryWriter
 
-from models.model import ResNet18Model, TinySwin, SmallSwin, LargeSwin
+from models.model import ResNet18Model, ResNet34Model, TinySwin, SmallSwin, LargeSwin
 from utils.logconf import logging
 from utils.data_loader import get_cifar10_dl, get_cifar100_dl
 from utils.ops import aug_image
@@ -33,7 +33,7 @@ class TinyImageNetTrainingApp:
         parser.add_argument("--in_channels", default=3, type=int, help="number of image channels")
         parser.add_argument("--lr", default=1e-5, type=float, help="learning rate")
         parser.add_argument("--dataset", default='cifar10', type=str, help="dataset to train on")
-        parser.add_argument("--model_name", default='resnet', type=str, help="name of the model to use")
+        parser.add_argument("--model_name", default='resnet34', type=str, help="name of the model to use")
         parser.add_argument("--optimizer_type", default='adam', type=str, help="type of optimizer to use")
         parser.add_argument("--label_smoothing", default=0.0, type=float, help="label smoothing in Cross Entropy Loss")
         parser.add_argument("--T_max", default=1000, type=int, help="T_max in Cosine LR scheduler")
@@ -90,8 +90,10 @@ class TinyImageNetTrainingApp:
             num_classes = 10
         elif self.args.dataset == 'cifar100':
             num_classes = 100
-        if self.args.model_name == 'resnet':
+        if self.args.model_name == 'resnet18':
             model = ResNet18Model(num_classes=num_classes)
+        if self.args.model_name == 'resnet34':
+            model = ResNet34Model(num_classes=num_classes)
         elif self.args.model_name == 'swint':
             model = TinySwin(num_classes=num_classes, pretrained=self.args.pretrained)
         elif self.args.model_name == 'swins':

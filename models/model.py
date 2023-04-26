@@ -1,15 +1,32 @@
 import torch.nn as  nn
 import torch
-from torchvision.models import resnet18, ResNet18_Weights, swin_t, swin_s, Swin_T_Weights, Swin_S_Weights
+from torchvision.models import resnet18, ResNet18_Weights, resnet34, ResNet34_Weights, swin_t, swin_s, Swin_T_Weights, Swin_S_Weights
 from timm import create_model
 from torchvision.transforms import Resize
 
 class ResNet18Model(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes,  pretrained=False):
         super().__init__()
-        # weights = ResNet18_Weights.DEFAULT
-        self.model = resnet18(weights=None)
+        if pretrained:
+            weights = ResNet18_Weights.DEFAULT
+        else:
+            weights = None
+        self.model = resnet18(weights=weights)
         self.model.fc = nn.Linear(512, num_classes)        
+
+    def forward(self, x):
+        out = self.model(x)
+        return out
+    
+class ResNet34Model(nn.Module):
+    def __init__(self, num_classes, pretrained=False):
+        super().__init__()
+        if pretrained:
+            weights = ResNet34_Weights.DEFAULT
+        else:
+            weights = None
+        self.model = resnet34(weights=weights)
+        self.model.fc = nn.Linear(512, num_classes)
 
     def forward(self, x):
         out = self.model(x)
