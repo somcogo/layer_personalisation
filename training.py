@@ -19,7 +19,7 @@ from utils.ops import aug_image
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
-log.setLevel(logging.DEBUG)
+# log.setLevel(logging.DEBUG)
 
 class TinyImageNetTrainingApp:
     def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None, save_model=None):
@@ -38,7 +38,7 @@ class TinyImageNetTrainingApp:
         parser.add_argument("--label_smoothing", default=0.0, type=float, help="label smoothing in Cross Entropy Loss")
         parser.add_argument("--T_max", default=1000, type=int, help="T_max in Cosine LR scheduler")
         parser.add_argument("--pretrained", default=False, type=bool, help="use pretrained model")
-        parser.add_argument("--aug_mode", default='standard', type=str, help="mode of data augmentation")
+        parser.add_argument("--aug_mode", default='segmentation', type=str, help="mode of data augmentation")
         parser.add_argument("--scheduler_mode", default=None, type=str, help="choice of LR scheduler")
         parser.add_argument("--save_model", default=False, type=bool, help="save models during training")
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
