@@ -22,7 +22,7 @@ log.setLevel(logging.INFO)
 log.setLevel(logging.DEBUG)
 
 class TinyImageNetTrainingApp:
-    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None):
+    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None, save_model=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
 
@@ -40,6 +40,7 @@ class TinyImageNetTrainingApp:
         parser.add_argument("--pretrained", default=False, type=bool, help="use pretrained model")
         parser.add_argument("--aug_mode", default='standard', type=str, help="mode of data augmentation")
         parser.add_argument("--scheduler_mode", default=None, type=str, help="choice of LR scheduler")
+        parser.add_argument("--save_model", default=False, type=bool, help="save models during training")
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
 
         self.args = parser.parse_args()
@@ -71,6 +72,8 @@ class TinyImageNetTrainingApp:
             self.args.aug_mode = aug_mode
         if scheduler_mode is not None:
             self.args.scheduler_mode = scheduler_mode
+        if save_model is not None:
+            self.args.save_model = save_model
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
@@ -170,7 +173,8 @@ class TinyImageNetTrainingApp:
                 self.logMetrics(epoch_ndx, 'val', valMetrics)
                 saving_criterion = max(correct_ratio, saving_criterion)
 
-                self.saveModel('imagenet', epoch_ndx, correct_ratio == saving_criterion)
+                if self.args.save_model:
+                    self.saveModel('imagenet', epoch_ndx, correct_ratio == saving_criterion)
             
             if self.args.scheduler_mode == 'cosine':
                 self.scheduler.step()
