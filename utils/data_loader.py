@@ -3,7 +3,7 @@ import random
 
 import numpy as np
 from torch.utils.data import DataLoader
-from torchvision.datasets import CIFAR10
+from torchvision.datasets import CIFAR10, CIFAR100
 from torchvision.transforms import Compose, ToTensor, Normalize
 
 data_path = 'data/'
@@ -21,9 +21,30 @@ def get_cifar10_datasets():
 
     return dataset, val_dataset
 
+def get_cifar100_datasets():
+    train_mean = [0.5071, 0.4866, 0.4409]
+    train_std = [0.2673, 0.2564, 0.2762]
+    train_transform = Compose([ToTensor(), Normalize(train_mean, train_std)])
+    val_mean = [0.5088, 0.4874, 0.4419]
+    val_std = [0.2683, 0.2574, 0.2771]
+    val_transform = Compose([ToTensor(), Normalize(val_mean, val_std)])
+
+    dataset = CIFAR100(root=data_path, train=True, download=True, transform=train_transform)
+    val_dataset = CIFAR100(root=data_path, train=False, download=True, transform=val_transform)
+
+    return dataset, val_dataset
+
 def get_cifar10_dl(partition, n_sites, batch_size):
     if partition == 'regular':
         dataset, val_dataset = get_cifar10_datasets()
+
+    train_dl = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+    val_dl = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+    return train_dl, val_dl
+
+def get_cifar100_dl(partition, n_sites, batch_size):
+    if partition == 'regular':
+        dataset, val_dataset = get_cifar100_datasets()
 
     train_dl = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, drop_last=False)
     val_dl = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)

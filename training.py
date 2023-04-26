@@ -13,16 +13,16 @@ from torch.utils.tensorboard import SummaryWriter
 
 from models.model import ResNet18Model, TinySwin, SmallSwin, LargeSwin
 from utils.logconf import logging
-from utils.data_loader import get_cifar10_dl
+from utils.data_loader import get_cifar10_dl, get_cifar100_dl
 from utils.ops import aug_image
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
 log.setLevel(logging.INFO)
-# log.setLevel(logging.DEBUG)
+log.setLevel(logging.DEBUG)
 
 class TinyImageNetTrainingApp:
-    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None):
+    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
 
@@ -32,7 +32,7 @@ class TinyImageNetTrainingApp:
         parser.add_argument("--logdir", default="test", type=str, help="directory to save the tensorboard logs")
         parser.add_argument("--in_channels", default=3, type=int, help="number of image channels")
         parser.add_argument("--lr", default=1e-5, type=float, help="learning rate")
-        parser.add_argument("--site", default=None, type=int, help="index of site to train on")
+        parser.add_argument("--dataset", default='cifar10', type=str, help="dataset to train on")
         parser.add_argument("--model_name", default='resnet', type=str, help="name of the model to use")
         parser.add_argument("--optimizer_type", default='adam', type=str, help="type of optimizer to use")
         parser.add_argument("--label_smoothing", default=0.0, type=float, help="label smoothing in Cross Entropy Loss")
@@ -53,6 +53,8 @@ class TinyImageNetTrainingApp:
             self.args.lr = lr
         if comment is not None:
             self.args.comment = comment
+        if dataset is not None:
+            self.args.dataset = dataset
         if site_number is not None:
             self.args.site_number = site_number
         if model_name is not None:
@@ -84,14 +86,18 @@ class TinyImageNetTrainingApp:
         self.scheduler = self.initScheduler()
 
     def initModel(self):
+        if self.args.dataset == 'cifar10':
+            num_classes = 10
+        elif self.args.dataset == 'cifar100':
+            num_classes = 100
         if self.args.model_name == 'resnet':
-            model = ResNet18Model(num_classes=10)
+            model = ResNet18Model(num_classes=num_classes)
         elif self.args.model_name == 'swint':
-            model = TinySwin(num_classes=10, pretrained=self.args.pretrained)
+            model = TinySwin(num_classes=num_classes, pretrained=self.args.pretrained)
         elif self.args.model_name == 'swins':
-            model = SmallSwin(num_classes=10, pretrained=self.args.pretrained)
+            model = SmallSwin(num_classes=num_classes, pretrained=self.args.pretrained)
         elif self.args.model_name == 'swinl':
-            model = LargeSwin(num_classes=10, pretrained=self.args.pretrained)
+            model = LargeSwin(num_classes=num_classes, pretrained=self.args.pretrained)
         if self.use_cuda:
             log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
             if torch.cuda.device_count() > 1:
@@ -122,7 +128,12 @@ class TinyImageNetTrainingApp:
         return scheduler
 
     def initDl(self):
-        trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
+        if self.args.dataset == 'cifar10':
+            log.debug('using cifar10')
+            trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
+        elif self.args.dataset == 'cifar100':
+            log.debug('using cifar100')
+            trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
         return trn_dl, val_dl
 
     def initTensorboardWriters(self):
