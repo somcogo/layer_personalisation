@@ -240,8 +240,8 @@ class TinyImageNetTrainingApp:
         labels = labels.to(device=self.device, non_blocking=True)
 
         if mode == 'trn':
-            assert self.args.aug_mode in ['standard', 'random_resized_crop', 'resnet']
-            batch = aug_image(batch, self.args.aug_mode, multi_training=False)
+            assert self.args.aug_mode in ['classification', 'segmentation']
+            batch = aug_image(batch, self.args.aug_mode)
 
         pred = self.model(batch)
         pred_label = torch.argmax(pred, dim=1)
