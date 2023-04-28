@@ -94,9 +94,9 @@ class TinyImageNetTrainingApp:
         elif self.args.dataset == 'cifar100':
             num_classes = 100
         if self.args.model_name == 'resnet18':
-            model = ResNet18Model(num_classes=num_classes)
+            model = ResNet18Model(num_classes=num_classes, pretrained=self.args.pretrained)
         if self.args.model_name == 'resnet34':
-            model = ResNet34Model(num_classes=num_classes)
+            model = ResNet34Model(num_classes=num_classes, pretrained=self.args.pretrained)
         elif self.args.model_name == 'swint':
             model = TinySwin(num_classes=num_classes, pretrained=self.args.pretrained)
         elif self.args.model_name == 'swins':
