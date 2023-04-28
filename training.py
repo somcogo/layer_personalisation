@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 # log.setLevel(logging.DEBUG)
 
-class TinyImageNetTrainingApp:
+class LayerPersonalisationTrainingApp:
     def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None, save_model=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
@@ -84,62 +84,83 @@ class TinyImageNetTrainingApp:
         self.val_writer = None
         self.totalTrainingSamples_count = 0
 
-        self.model = self.initModel()
-        self.optimizer = self.initOptimizer()
-        self.scheduler = self.initScheduler()
+        self.models = self.initModels()
+        self.optims = self.initOptimizers()
+        self.schedulers = self.initSchedulers()
 
-    def initModel(self):
+    def initModels(self):
         if self.args.dataset == 'cifar10':
             num_classes = 10
         elif self.args.dataset == 'cifar100':
             num_classes = 100
-        if self.args.model_name == 'resnet18':
-            model = ResNet18Model(num_classes=num_classes)
-        if self.args.model_name == 'resnet34':
-            model = ResNet34Model(num_classes=num_classes)
-        elif self.args.model_name == 'swint':
-            model = TinySwin(num_classes=num_classes, pretrained=self.args.pretrained)
-        elif self.args.model_name == 'swins':
-            model = SmallSwin(num_classes=num_classes, pretrained=self.args.pretrained)
-        elif self.args.model_name == 'swinl':
-            model = LargeSwin(num_classes=num_classes, pretrained=self.args.pretrained)
+        elif self.args.dataset == 'pascalvoc':
+            num_classes = 20
+        models = []
+        for _ in range(self.args.site_number):
+            if self.args.model_name == 'resnet18':
+                model = ResNet18Model(num_classes=num_classes, pretrained=self.args.pretrained)
+            if self.args.model_name == 'resnet34':
+                model = ResNet34Model(num_classes=num_classes, pretrained=self.args.pretrained)
+            elif self.args.model_name == 'swint':
+                model = TinySwin(num_classes=num_classes, pretrained=self.args.pretrained)
+            elif self.args.model_name == 'swins':
+                model = SmallSwin(num_classes=num_classes, pretrained=self.args.pretrained)
+            elif self.args.model_name == 'swinl':
+                model = LargeSwin(num_classes=num_classes, pretrained=self.args.pretrained)
+            models.append(model)
         if self.use_cuda:
             log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
-            if torch.cuda.device_count() > 1:
-                model = nn.DataParallel(model)
-            model = model.to(self.device)
-        return model
+            for model in models:
+                if torch.cuda.device_count() > 1:
+                    model = nn.DataParallel(model)
+                model = model.to(self.device)
+        return models
 
-    def initOptimizer(self):
-        if self.args.optimizer_type == 'adam':
-            optim = Adam(params=self.model.parameters(), lr=self.args.lr)
-        elif self.args.optimizer_type == 'adamw':
-            optim = AdamW(params=self.model.parameters(), lr=self.args.lr, weight_decay=0.05)
-        elif self.args.optimizer_type == 'sgd':
-            optim = SGD(params=self.model.parameters(), lr=self.args.lr, weight_decay=0.0001, momentum=0.9)
-        return optim
+    def initOptimizers(self):
+        optims = []
+        for model in self.models:
+            if self.args.optimizer_type == 'adam':
+                optim = Adam(params=model.parameters(), lr=self.args.lr)
+            elif self.args.optimizer_type == 'adamw':
+                optim = AdamW(params=model.parameters(), lr=self.args.lr, weight_decay=0.05)
+            elif self.args.optimizer_type == 'sgd':
+                optim = SGD(params=model.parameters(), lr=self.args.lr, weight_decay=0.0001, momentum=0.9)
+            optims.append(optim)
+        return optims
     
-    def initScheduler(self):
-        if self.args.scheduler_mode == 'cosine':
-            scheduler = CosineAnnealingLR(self.optimizer, T_max=self.args.T_max)
-        elif self.args.scheduler_mode == 'onecycle':
-            scheduler = OneCycleLR(self.optimizer, max_lr=0.05,
-                                   steps_per_epoch=(100000//self.args.batch_size),
-                                   epochs=self.args.epochs, div_factor=10,
-                                   final_div_factor=50, pct_start=0.3)
+    def initSchedulers(self):
+        if self.args.scheduler_mode is None:
+            schedulers = None
         else:
-            assert self.args.scheduler_mode is None
-            scheduler = None
-        return scheduler
+            schedulers = []
+        for optim in self.optims:
+            if self.args.scheduler_mode == 'cosine':
+                scheduler = CosineAnnealingLR(optim, T_max=self.args.T_max)
+            elif self.args.scheduler_mode == 'onecycle':
+                scheduler = OneCycleLR(optim, max_lr=0.05,
+                                    steps_per_epoch=(100000//self.args.batch_size),
+                                    epochs=self.args.epochs, div_factor=10,
+                                    final_div_factor=50, pct_start=0.3)
+            schedulers.append(scheduler)
+            
+        return schedulers
 
-    def initDl(self):
-        if self.args.dataset == 'cifar10':
-            log.debug('using cifar10')
-            trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
-        elif self.args.dataset == 'cifar100':
-            log.debug('using cifar100')
-            trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
-        return trn_dl, val_dl
+    def initDls(self):
+        trn_dls = []
+        val_dls = []
+        for ndx in range(self.args.site_number):
+            if self.args.dataset == 'cifar10':
+                log.debug('using cifar10')
+                # TODO: site_id
+                trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
+                # trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
+            elif self.args.dataset == 'cifar100':
+                log.debug('using cifar100')
+                trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
+                # trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
+            trn_dls.append(trn_dl)
+            val_dls.append(val_dl)
+        return trn_dls, val_dls
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
@@ -151,90 +172,116 @@ class TinyImageNetTrainingApp:
     def main(self):
         log.info("Starting {}, {}".format(type(self).__name__, self.args))
 
-        train_dl, val_dl = self.initDl()
+        trn_dls, val_dls = self.initDls()
 
         saving_criterion = 0
         validation_cadence = 5
         for epoch_ndx in range(1, self.args.epochs + 1):
 
-            if epoch_ndx == 1 or epoch_ndx % 10 == 0:
-                log.info("Epoch {} of {}, {}/{} batches of size {}*{}".format(
+            if epoch_ndx == 1:
+                log.info("Epoch {} of {}, training on {} sites, using {} device".format(
                     epoch_ndx,
                     self.args.epochs,
-                    len(train_dl),
-                    len(val_dl),
-                    self.args.batch_size,
+                    len(trn_dls),
                     (torch.cuda.device_count() if self.use_cuda else 1),
                 ))
 
-            trnMetrics = self.doTraining(epoch_ndx, train_dl)
-            self.logMetrics(epoch_ndx, 'trn', trnMetrics)
+            trn_metrics = self.doTraining(epoch_ndx, trn_dls)
+            self.logMetrics(epoch_ndx, 'trn', trn_metrics)
 
             if epoch_ndx == 1 or epoch_ndx % validation_cadence == 0:
-                valMetrics, correct_ratio = self.doValidation(epoch_ndx, val_dl)
-                self.logMetrics(epoch_ndx, 'val', valMetrics)
-                saving_criterion = max(correct_ratio, saving_criterion)
+                val_metrics, accuracy = self.doValidation(epoch_ndx, val_dls)
+                self.logMetrics(epoch_ndx, 'val', val_metrics)
+                saving_criterion = max(accuracy, saving_criterion)
 
                 if self.args.save_model:
-                    self.saveModel('imagenet', epoch_ndx, correct_ratio == saving_criterion)
+                    self.saveModel('imagenet', epoch_ndx, accuracy == saving_criterion)
+
+                log.info('fix logging')
             
             if self.args.scheduler_mode == 'cosine':
-                self.scheduler.step()
-                # log.debug(self.scheduler.get_last_lr())
+                for scheduler in self.schedulers:
+                    scheduler.step()
+                    # log.debug(self.scheduler.get_last_lr())
 
         if hasattr(self, 'trn_writer'):
             self.trn_writer.close()
             self.val_writer.close()
 
-    def doTraining(self, epoch_ndx, train_dl):
-        self.model.train()
-        trnMetrics = torch.zeros(2, len(train_dl), device=self.device)
+    def doTraining(self, epoch_ndx, trn_dls):
+        for model in self.models:
+            model.train()
 
-        if epoch_ndx == 1 or epoch_ndx % 10 == 0:
-            log.warning('E{} Training ---/{} starting'.format(epoch_ndx, len(train_dl)))
+        trn_metrics = torch.zeros(2 + 2*self.args.site_number, device=self.device)
+        loss = 0
+        correct = 0
+        total = 0
+        for ndx, trn_dl in enumerate(trn_dls):
+            local_trn_metrics = torch.zeros(3, len(trn_dl), device=self.device)
 
-        for batch_ndx, batch_tuple in enumerate(train_dl):
-            self.optimizer.zero_grad()
+            for batch_ndx, batch_tuple in enumerate(trn_dl):
+                self.optims[ndx].zero_grad()
 
-            loss, _ = self.computeBatchLoss(
-                batch_ndx,
-                batch_tuple,
-                trnMetrics,
-                'trn')
-
-            loss.backward()
-            self.optimizer.step()
-            if self.args.scheduler_mode == 'onecycle':
-                self.scheduler.step()
-
-            if batch_ndx % 1000 == 0 and batch_ndx > 199:
-                log.info('E{} Training {}/{}'.format(epoch_ndx, batch_ndx, len(train_dl)))
-
-        self.totalTrainingSamples_count += len(train_dl.dataset)
-
-        return trnMetrics.to('cpu')
-
-    def doValidation(self, epoch_ndx, val_dl):
-        with torch.no_grad():
-            self.model.eval()
-            valMetrics = torch.zeros(2, len(val_dl), device=self.device)
-
-            if epoch_ndx == 1 or epoch_ndx % 10 == 0:
-                log.warning('E{} Validation ---/{} starting'.format(epoch_ndx, len(val_dl)))
-
-            for batch_ndx, batch_tuple in enumerate(val_dl):
-                _, accuracy = self.computeBatchLoss(
+                loss, _ = self.computeBatchLoss(
                     batch_ndx,
                     batch_tuple,
-                    valMetrics,
-                    'val'
-                )
-                if batch_ndx % 50 == 0 and batch_ndx > 49:
-                    log.info('E{} Validation {}/{}'.format(epoch_ndx, batch_ndx, len(val_dl)))
+                    self.models[ndx],
+                    local_trn_metrics,
+                    'trn')
 
-        return valMetrics.to('cpu'), accuracy
+                loss.backward()
+                self.optims[ndx].step()
+                if self.args.scheduler_mode == 'onecycle':
+                    self.schedulers[ndx].step()
 
-    def computeBatchLoss(self, batch_ndx, batch_tup, metrics, mode):
+            loss += local_trn_metrics[0].sum()
+            correct += local_trn_metrics[1].sum()
+            total += local_trn_metrics[2].sum()
+            trn_metrics[2*ndx] = local_trn_metrics[0].mean()
+            trn_metrics[2*ndx + 1] = local_trn_metrics[1].sum() / local_trn_metrics[2].sum()
+
+        trn_metrics[-2] = loss / total
+        trn_metrics[-1] = correct / total
+
+        self.totalTrainingSamples_count += len(trn_dls[0].dataset)
+
+        return trn_metrics.to('cpu')
+
+    def doValidation(self, epoch_ndx, val_dls):
+        with torch.no_grad():
+            for model in self.models:
+                model.eval()
+            if epoch_ndx == 1:
+                log.warning('E{} Validation starting'.format(epoch_ndx))
+
+            val_metrics = torch.zeros(2 + 2*self.args.site_number, device=self.device)
+            loss = 0
+            correct = 0
+            total = 0
+            for ndx, val_dl in enumerate(val_dls):
+                local_val_metrics = torch.zeros(3, len(val_dl), device=self.device)
+
+                for batch_ndx, batch_tuple in enumerate(val_dl):
+                    _, accuracy = self.computeBatchLoss(
+                        batch_ndx,
+                        batch_tuple,
+                        self.models[ndx],
+                        local_val_metrics,
+                        'val'
+                    )
+                
+                loss += local_val_metrics[0].sum()
+                correct += local_val_metrics[1].sum()
+                total += local_val_metrics[2].sum()
+                val_metrics[2*ndx] = local_val_metrics[0].mean()
+                val_metrics[2*ndx + 1] = local_val_metrics[1].sum() / local_val_metrics[2].sum()
+
+            val_metrics[-2] = loss / total
+            val_metrics[-1] = correct / total
+
+        return val_metrics.to('cpu'), accuracy
+
+    def computeBatchLoss(self, batch_ndx, batch_tup, model, metrics, mode):
         batch, labels = batch_tup
         batch = batch.to(device=self.device, non_blocking=True)
         labels = labels.to(device=self.device, non_blocking=True)
@@ -243,7 +290,7 @@ class TinyImageNetTrainingApp:
             assert self.args.aug_mode in ['classification', 'segmentation']
             batch = aug_image(batch, self.args.aug_mode)
 
-        pred = self.model(batch)
+        pred = model(batch)
         pred_label = torch.argmax(pred, dim=1)
         loss_fn = nn.CrossEntropyLoss(label_smoothing=self.args.label_smoothing)
         loss = loss_fn(pred, labels)
@@ -253,7 +300,8 @@ class TinyImageNetTrainingApp:
         accuracy = correct / batch.shape[0] * 100
 
         metrics[0, batch_ndx] = loss.detach()
-        metrics[1, batch_ndx] = accuracy
+        metrics[1, batch_ndx] = correct
+        metrics[2, batch_ndx] = batch.shape[0]
 
         return loss.mean(), accuracy
 
@@ -261,30 +309,31 @@ class TinyImageNetTrainingApp:
         self,
         epoch_ndx,
         mode_str,
-        metrics,
-        img_list=None
+        metrics
     ):
         self.initTensorboardWriters()
 
-        if epoch_ndx == 1 or epoch_ndx % 10 == 0:
-            log.info(
-                "E{} {}:{} loss".format(
-                    epoch_ndx,
-                    mode_str,
-                    metrics[0].mean()
-                )
-            )
-
         writer = getattr(self, mode_str + '_writer')
+        for ndx in range(self.args.site_number):
+            writer.add_scalar(
+                'loss/site {}'.format(ndx),
+                scalar_value=metrics[2*ndx],
+                global_step=epoch_ndx
+            )
+            writer.add_scalar(
+                'accuracy/site {}'.format(ndx),
+                scalar_value=metrics[2*ndx + 1],
+                global_step=epoch_ndx
+            )
         writer.add_scalar(
-            'loss_total',
-            scalar_value=metrics[0].mean(),
-            global_step=self.totalTrainingSamples_count
+            'loss/overall',
+            scalar_value=metrics[-2],
+            global_step=epoch_ndx
         )
         writer.add_scalar(
             'accuracy/overall',
-            scalar_value=metrics[1].mean(),
-            global_step=self.totalTrainingSamples_count
+            scalar_value=metrics[-1],
+            global_step=epoch_ndx
         )
         writer.flush()
 
@@ -335,4 +384,4 @@ class TinyImageNetTrainingApp:
             log.debug("Saved model params to {}".format(best_path))
 
 if __name__ == '__main__':
-    TinyImageNetTrainingApp().main()
+    LayerPersonalisationTrainingApp().main()
