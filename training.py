@@ -11,10 +11,10 @@ from torch.optim import Adam, AdamW, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
 from torch.utils.tensorboard import SummaryWriter
 
-from models.model import ResNet18Model, ResNet34Model, TinySwin, SmallSwin, LargeSwin
+from models.model import ResNet18Model, ResNet34Model, TinySwin, SmallSwin, LargeSwin, UnetWithResNet34
 from utils.logconf import logging
-from utils.data_loader import get_cifar10_dl, get_cifar100_dl
-from utils.ops import aug_image
+from utils.data_loader import get_cifar10_dl, get_cifar100_dl, get_pascalvoc_dl
+from utils.ops import aug_image, batch_miou
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
@@ -93,6 +93,8 @@ class TinyImageNetTrainingApp:
             num_classes = 10
         elif self.args.dataset == 'cifar100':
             num_classes = 100
+        elif self.args.dataset == 'pascalvoc':
+            num_classes = 21
         if self.args.model_name == 'resnet18':
             model = ResNet18Model(num_classes=num_classes, pretrained=self.args.pretrained)
         if self.args.model_name == 'resnet34':
@@ -103,6 +105,8 @@ class TinyImageNetTrainingApp:
             model = SmallSwin(num_classes=num_classes, pretrained=self.args.pretrained)
         elif self.args.model_name == 'swinl':
             model = LargeSwin(num_classes=num_classes, pretrained=self.args.pretrained)
+        elif self.args.model_name == 'unetresnet34':
+            model = UnetWithResNet34(num_classes=num_classes, pretrained=self.args.pretrained)
         if self.use_cuda:
             log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
             if torch.cuda.device_count() > 1:
@@ -139,6 +143,9 @@ class TinyImageNetTrainingApp:
         elif self.args.dataset == 'cifar100':
             log.debug('using cifar100')
             trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
+        elif self.args.dataset == 'pascalvoc':
+            log.debug('using pascalvoc')
+            trn_dl, val_dl = get_pascalvoc_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
         return trn_dl, val_dl
 
     def initTensorboardWriters(self):
@@ -207,9 +214,6 @@ class TinyImageNetTrainingApp:
             if self.args.scheduler_mode == 'onecycle':
                 self.scheduler.step()
 
-            if batch_ndx % 1000 == 0 and batch_ndx > 199:
-                log.info('E{} Training {}/{}'.format(epoch_ndx, batch_ndx, len(train_dl)))
-
         self.totalTrainingSamples_count += len(train_dl.dataset)
 
         return trnMetrics.to('cpu')
@@ -229,28 +233,29 @@ class TinyImageNetTrainingApp:
                     valMetrics,
                     'val'
                 )
-                if batch_ndx % 50 == 0 and batch_ndx > 49:
-                    log.info('E{} Validation {}/{}'.format(epoch_ndx, batch_ndx, len(val_dl)))
 
         return valMetrics.to('cpu'), accuracy
 
     def computeBatchLoss(self, batch_ndx, batch_tup, metrics, mode):
         batch, labels = batch_tup
         batch = batch.to(device=self.device, non_blocking=True)
-        labels = labels.to(device=self.device, non_blocking=True)
+        labels = labels.to(device=self.device, non_blocking=True).squeeze()
 
         if mode == 'trn':
             assert self.args.aug_mode in ['classification', 'segmentation']
-            batch = aug_image(batch, self.args.aug_mode)
+            batch, labels = aug_image(batch, labels, self.args.aug_mode)
 
         pred = self.model(batch)
         pred_label = torch.argmax(pred, dim=1)
         loss_fn = nn.CrossEntropyLoss(label_smoothing=self.args.label_smoothing)
         loss = loss_fn(pred, labels)
 
-        correct_mask = pred_label == labels
-        correct = torch.sum(correct_mask)
-        accuracy = correct / batch.shape[0] * 100
+        if self.args.aug_mode == 'classification':
+            correct_mask = pred_label == labels
+            correct = torch.sum(correct_mask)
+            accuracy = correct / batch.shape[0] * 100
+        elif self.args.aug_mode == 'segmentation':
+            accuracy = batch_miou(pred_label, labels).mean()
 
         metrics[0, batch_ndx] = loss.detach()
         metrics[1, batch_ndx] = accuracy
@@ -276,13 +281,17 @@ class TinyImageNetTrainingApp:
             )
 
         writer = getattr(self, mode_str + '_writer')
+        if self.args.aug_mode == 'classification':
+            metric_name = 'accuracy'
+        else:
+            metric_name = 'miou'
         writer.add_scalar(
-            'loss_total',
+            'loss/overall',
             scalar_value=metrics[0].mean(),
             global_step=self.totalTrainingSamples_count
         )
         writer.add_scalar(
-            'accuracy/overall',
+            '{}/overall'.format(metric_name),
             scalar_value=metrics[1].mean(),
             global_step=self.totalTrainingSamples_count
         )
