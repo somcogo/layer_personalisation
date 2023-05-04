@@ -9,6 +9,7 @@ import numpy as np
 import scipy.io as sio
 from PIL import Image
 from torch.utils.data import Dataset
+from torchvision.transforms import Compose, Resize, ToTensor, Normalize, InterpolationMode
 from pathlib import Path
 
 class PascalVocAugmentedSegmentation(Dataset):
@@ -32,6 +33,7 @@ class PascalVocAugmentedSegmentation(Dataset):
         self.images_dir = Path('{}/dataset/img'.format(root_dir))
         self.masks_dir = Path('{}/dataset/cls'.format(root_dir))
         self.split_file = Path('{}/dataset/{}.txt'.format(root_dir, split))
+        self.split = split
         self.transform = transform
         self.images = list()
         self.masks = list()
@@ -95,18 +97,26 @@ class PascalVocAugmentedSegmentation(Dataset):
             else:
                 categories = np.asarray([categories]).astype(np.uint8)
             targets.append(categories)
-        self.targets = np.asarray(targets)
+        self.targets = np.asarray(targets, dtype=object)
 
     def __getitem__(self, index):
         img = Image.open(self.images[index]).convert('RGB')
         mat = sio.loadmat(self.masks[index], mat_dtype=True, squeeze_me=True, struct_as_record=False)
         mask = mat['GTcls'].Segmentation
         mask = Image.fromarray(mask)
-        sample = {'image': img, 'label': mask}
- 
-        if self.transform is not None:
-            sample = self.transform(sample)
-        return sample
+
+        if self.split == 'train':
+            mean = [0.4585, 0.4389, 0.4058]
+            std = [0.2664, 0.2634, 0.2774]
+        elif self.split == 'val':
+            mean = [0.4561, 0.4353, 0.4013]
+            std = [0.2657, 0.2625, 0.2771]
+        img_trans = Compose([Resize((224, 224)), ToTensor(), Normalize(mean, std)])
+        mask_trans = Compose([Resize((224, 224), interpolation=InterpolationMode.NEAREST), ToTensor()])
+        img = img_trans(img)
+        mask = mask_trans(mask) * 255
+        mask = mask.to(dtype=int)
+        return (img, mask)
 
     def __len__(self):
         return len(self.images)

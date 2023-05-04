@@ -4,7 +4,9 @@ import random
 import numpy as np
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10, CIFAR100
-from torchvision.transforms import Compose, ToTensor, Normalize
+from torchvision.transforms import Compose, ToTensor, Normalize, Resize
+
+from .datasets import PascalVocAugmentedSegmentation
 
 data_path = 'data/'
 
@@ -36,6 +38,11 @@ def get_cifar100_datasets(data_dir):
 
     return dataset, val_dataset
 
+def get_pascal_voc_datasets(data_dir):
+    dataset = PascalVocAugmentedSegmentation(root_dir=data_dir, split='train')
+    val_dataset = PascalVocAugmentedSegmentation(root_dir=data_dir, split='val')
+    return dataset, val_dataset
+
 def get_cifar10_dl(partition, n_sites, batch_size):
     if partition == 'regular':
         dataset, val_dataset = get_cifar10_datasets(data_path)
@@ -48,6 +55,14 @@ def get_cifar100_dl(partition, n_sites, batch_size):
     if partition == 'regular':
         dataset, val_dataset = get_cifar100_datasets(data_path)
 
+    train_dl = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+    val_dl = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+    return train_dl, val_dl
+
+def get_pascal_voc_dl(partition, n_site, batch_size):
+    if partition == 'regular':
+        dataset, val_dataset = get_pascal_voc_datasets(data_path)
+    
     train_dl = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, drop_last=False)
     val_dl = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     return train_dl, val_dl

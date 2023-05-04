@@ -11,10 +11,10 @@ from torch.optim import Adam, AdamW, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
 from torch.utils.tensorboard import SummaryWriter
 
-from models.model import ResNet18Model, ResNet34Model, TinySwin, SmallSwin, LargeSwin
+from models.model import ResNet18Model, ResNet34Model, TinySwin, SmallSwin, LargeSwin, UnetWithResNet34
 from utils.logconf import logging
-from utils.data_loader import get_cifar10_dl, get_cifar100_dl
-from utils.ops import aug_image
+from utils.data_loader import get_cifar10_dl, get_cifar100_dl, get_pascal_voc_dl
+from utils.ops import aug_image, batch_miou
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
@@ -94,7 +94,7 @@ class LayerPersonalisationTrainingApp:
         elif self.args.dataset == 'cifar100':
             num_classes = 100
         elif self.args.dataset == 'pascalvoc':
-            num_classes = 20
+            num_classes = 21
         models = []
         for _ in range(self.args.site_number):
             if self.args.model_name == 'resnet18':
@@ -107,6 +107,8 @@ class LayerPersonalisationTrainingApp:
                 model = SmallSwin(num_classes=num_classes, pretrained=self.args.pretrained)
             elif self.args.model_name == 'swinl':
                 model = LargeSwin(num_classes=num_classes, pretrained=self.args.pretrained)
+            elif self.args.model_name == 'unetresnet34':
+                model = UnetWithResNet34(num_classes=num_classes, pretrained=self.args.pretrained)
             models.append(model)
         if self.use_cuda:
             log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
@@ -158,6 +160,9 @@ class LayerPersonalisationTrainingApp:
                 log.debug('using cifar100')
                 trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
                 # trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
+            elif self.args.dataset == 'pascalvoc':
+                trn_dl, val_dl = get_pascal_voc_dl(partition='regular', n_site=1, batch_size=self.args.batch_size)
+                # trn_dl, val_dl = get_pascal_voc_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
             trn_dls.append(trn_dl)
             val_dls.append(val_dl)
         return trn_dls, val_dls
@@ -173,6 +178,7 @@ class LayerPersonalisationTrainingApp:
         log.info("Starting {}, {}".format(type(self).__name__, self.args))
 
         trn_dls, val_dls = self.initDls()
+        log.debug('initiated dls')
 
         saving_criterion = 0
         validation_cadence = 5
@@ -197,7 +203,7 @@ class LayerPersonalisationTrainingApp:
                 if self.args.save_model:
                     self.saveModel('imagenet', epoch_ndx, accuracy == saving_criterion)
 
-                log.info('fix logging')
+                log.info('Epoch {} of {}, accuracy/miou {}'.format(epoch_ndx, self.args.epochs, accuracy))
             
             if self.args.scheduler_mode == 'cosine':
                 for scheduler in self.schedulers:
@@ -237,7 +243,7 @@ class LayerPersonalisationTrainingApp:
             loss += local_trn_metrics[0].sum()
             correct += local_trn_metrics[1].sum()
             total += local_trn_metrics[2].sum()
-            trn_metrics[2*ndx] = local_trn_metrics[0].mean()
+            trn_metrics[2*ndx] = local_trn_metrics[0].sum() / local_trn_metrics[2].sum()
             trn_metrics[2*ndx + 1] = local_trn_metrics[1].sum() / local_trn_metrics[2].sum()
 
         trn_metrics[-2] = loss / total
@@ -279,29 +285,35 @@ class LayerPersonalisationTrainingApp:
             val_metrics[-2] = loss / total
             val_metrics[-1] = correct / total
 
-        return val_metrics.to('cpu'), accuracy
+        return val_metrics.to('cpu'), correct / total
 
     def computeBatchLoss(self, batch_ndx, batch_tup, model, metrics, mode):
         batch, labels = batch_tup
         batch = batch.to(device=self.device, non_blocking=True)
-        labels = labels.to(device=self.device, non_blocking=True)
+        labels = labels.to(device=self.device, non_blocking=True).squeeze()
 
         if mode == 'trn':
             assert self.args.aug_mode in ['classification', 'segmentation']
-            batch = aug_image(batch, self.args.aug_mode)
+            batch, labels = aug_image(batch, labels, self.args.aug_mode)
 
         pred = model(batch)
         pred_label = torch.argmax(pred, dim=1)
         loss_fn = nn.CrossEntropyLoss(label_smoothing=self.args.label_smoothing)
         loss = loss_fn(pred, labels)
 
-        correct_mask = pred_label == labels
-        correct = torch.sum(correct_mask)
-        accuracy = correct / batch.shape[0] * 100
-
         metrics[0, batch_ndx] = loss.detach()
-        metrics[1, batch_ndx] = correct
         metrics[2, batch_ndx] = batch.shape[0]
+
+        if self.args.aug_mode == 'classification':
+            correct_mask = pred_label == labels
+            correct = torch.sum(correct_mask)
+            accuracy = correct / batch.shape[0] * 100
+
+            metrics[1, batch_ndx] = correct
+        elif self.args.aug_mode == 'segmentation':
+            accuracy = batch_miou(pred_label, labels)
+
+            metrics[1, batch_ndx] = accuracy.sum()
 
         return loss.mean(), accuracy
 
@@ -314,6 +326,10 @@ class LayerPersonalisationTrainingApp:
         self.initTensorboardWriters()
 
         writer = getattr(self, mode_str + '_writer')
+        if self.args.aug_mode == 'classification':
+            metric_name = 'accuracy'
+        else:
+            metric_name = 'miou'
         for ndx in range(self.args.site_number):
             writer.add_scalar(
                 'loss/site {}'.format(ndx),
@@ -321,7 +337,7 @@ class LayerPersonalisationTrainingApp:
                 global_step=epoch_ndx
             )
             writer.add_scalar(
-                'accuracy/site {}'.format(ndx),
+                '{}/site {}'.format(metric_name,ndx),
                 scalar_value=metrics[2*ndx + 1],
                 global_step=epoch_ndx
             )
@@ -331,7 +347,7 @@ class LayerPersonalisationTrainingApp:
             global_step=epoch_ndx
         )
         writer.add_scalar(
-            'accuracy/overall',
+            '{}/overall'.format(metric_name),
             scalar_value=metrics[-1],
             global_step=epoch_ndx
         )

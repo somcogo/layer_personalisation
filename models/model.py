@@ -1,8 +1,9 @@
 import torch.nn as  nn
 import torch
 from torchvision.models import resnet18, ResNet18_Weights, resnet34, ResNet34_Weights, swin_t, swin_s, Swin_T_Weights, Swin_S_Weights
-from timm import create_model
 from torchvision.transforms import Resize
+from timm import create_model
+import segmentation_models_pytorch as smp
 
 class ResNet18Model(nn.Module):
     def __init__(self, num_classes,  pretrained=False):
@@ -74,4 +75,17 @@ class LargeSwin(nn.Module):
     def forward(self, x):
         x = self.resize(x)
         out = self.large_swin(x)
+        return out
+    
+class UnetWithResNet34(nn.Module):
+    def __init__(self, num_classes, pretrained):
+        super().__init__()
+        if pretrained:
+            weights = 'imagenet'
+        else:
+            weights = None
+        self.unet = smp.Unet('resnet34', encoder_depth=5, encoder_weights=weights, in_channels=3, classes=num_classes)
+
+    def forward(self, x):
+        out = self.unet(x)
         return out
