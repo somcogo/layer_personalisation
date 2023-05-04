@@ -5,23 +5,25 @@ import numpy as np
 from fedml.data.cifar10.data_loader import partition_data as cifar10_partition
 from fedml.data.cifar100.data_loader import partition_data as cifar100_partition
 
-from .data_loader import get_cifar10_datasets, get_cifar100_datasets
+from .data_loader import get_cifar10_datasets, get_cifar100_datasets, get_pascal_voc_datasets
 
 def partition(data_dir, dataset, partition, n_sites, alpha=None):
 
     if partition == 'by-class':
-        partition_tuple = partition_by_class(data_dir, dataset, n_sites)
+        (net_dataidx_map_train, net_dataidx_map_test) = partition_by_class(data_dir, dataset, n_sites)
     elif partition == 'dirichlet':
-        partition_tuple = partition_with_dirichlet_distribution(data_dir, dataset, n_sites, alpha)
-    return partition_tuple
+        (net_dataidx_map_train, net_dataidx_map_test) = partition_with_dirichlet_distribution(data_dir, dataset, n_sites, alpha)
+    return (net_dataidx_map_train, net_dataidx_map_test)
 
 def partition_by_class(data_dir, dataset, n_sites):
     if dataset == 'cifar10':
         train_ds, test_ds = get_cifar10_datasets(data_dir)
     if dataset == 'cifar100':
         train_ds, test_ds = get_cifar100_datasets(data_dir)
-    X_train, y_train = train_ds.data, train_ds.targets
-    X_test, y_test = test_ds.data, test_ds.targets
+    if dataset == 'pascalvoc':
+        train_ds, test_ds = get_pascal_voc_datasets(data_dir, use_hdf5=True)
+    y_train = train_ds.targets
+    y_test = test_ds.targets
 
     if dataset == "cifar10":
         num = 2
@@ -29,6 +31,9 @@ def partition_by_class(data_dir, dataset, n_sites):
     elif dataset == "cifar100":
         num = 10
         K = 100
+    elif dataset == 'pascalvoc':
+        num = 4
+        K = 20
 
     # -------------------------------------------#
     # Divide classes + num samples for each user #
@@ -60,8 +65,12 @@ def partition_by_class(data_dir, dataset, n_sites):
     # -------------------------- #
     # Create class index mapping #
     # -------------------------- #
-    data_class_idx_train = {i: np.where(y_train == i)[0] for i in range(K)}
-    data_class_idx_test = {i: np.where(y_test == i)[0] for i in range(K)}
+    if dataset == 'pascalvoc':
+        data_class_idx_train = {i: np.where([i in img_labels for img_labels in y_train])[0] for i in range(K)}
+        data_class_idx_test = {i: np.where([i in img_labels for img_labels in y_test])[0] for i in range(K)}
+    else:
+        data_class_idx_train = {i: np.where(y_train == i)[0] for i in range(K)}
+        data_class_idx_test = {i: np.where(y_test == i)[0] for i in range(K)}
 
     num_samples_train = {i: len(data_class_idx_train[i]) for i in range(K)}
     num_samples_test = {i: len(data_class_idx_test[i]) for i in range(K)}
@@ -91,7 +100,7 @@ def partition_by_class(data_dir, dataset, n_sites):
             data_class_idx_train[c] = data_class_idx_train[c][end_idx_train:]
             data_class_idx_test[c] = data_class_idx_test[c][end_idx_test:]
 
-    return (X_train, y_train, X_test, y_test, net_dataidx_map_train, net_dataidx_map_test)
+    return (net_dataidx_map_train, net_dataidx_map_test)
 
 # TODO: link fedml, fedtp 
 # https://github.com/zhyczy/FedTP/blob/main/utils.py
@@ -103,9 +112,9 @@ def partition_with_dirichlet_distribution(data_dir, dataset, n_sites, alpha):
     if dataset == 'cifar100':
         train_ds, test_ds = get_cifar100_datasets(data_dir)
     if dataset == 'pascalvoc':
-        return
-    X_train, y_train = train_ds.data, train_ds.targets
-    X_test, y_test = test_ds.data, test_ds.targets
+        train_ds, test_ds = get_pascal_voc_datasets(data_dir, use_hdf5=True)
+    y_train = train_ds.targets
+    y_test = test_ds.targets
 
     min_size = 0
     min_require_size = 10
@@ -149,7 +158,7 @@ def partition_with_dirichlet_distribution(data_dir, dataset, n_sites, alpha):
             net_dataidx_map_train[j] = idx_batch_train[j]
             net_dataidx_map_test[j] = idx_batch_test[j]
 
-    return (X_train, y_train, X_test, y_test, net_dataidx_map_train, net_dataidx_map_test)
+    return (net_dataidx_map_train, net_dataidx_map_test)
 
 def partition_class_samples_with_dirichlet_distribution(N, alpha, n_sites, idx_batch_train, idx_batch_test, train_idx_k, test_idx_k):
 

@@ -21,11 +21,11 @@ class QuickPascalVocAugmentedSegmentation(Dataset):
         hdf5_file = h5py.File(file_path, 'r')
         self.image_ds = hdf5_file['data']
         self.mask_ds = hdf5_file['mask']
-        self.target = np.array(hdf5_file['targets'], dtype=object)
+        self.targets = np.array(hdf5_file['targets'], dtype=object)
         if data_idxs is not None:
             self.image_ds = self.image_ds[data_idxs]
             self.mask_ds = self.mask_ds[data_idxs]
-            self.target_ds = self.target_ds[data_idxs]
+            self.targets = self.targets[data_idxs]
 
     def __len__(self):
         return self.image_ds.shape[0]
