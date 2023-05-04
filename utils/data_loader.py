@@ -63,7 +63,7 @@ def get_cifar100_dl(partition, n_sites, batch_size):
     val_dl = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     return train_dl, val_dl
 
-def get_pascal_voc_dl(partition, n_site, batch_size, use_hdf5=False):
+def get_pascal_voc_dl(partition, n_site, batch_size, use_hdf5=True):
     print('using hdf5:', use_hdf5)
     if partition == 'regular':
         dataset, val_dataset = get_pascal_voc_datasets(data_path, use_hdf5=use_hdf5)

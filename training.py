@@ -279,7 +279,7 @@ class LayerPersonalisationTrainingApp:
                 loss += local_val_metrics[0].sum()
                 correct += local_val_metrics[1].sum()
                 total += local_val_metrics[2].sum()
-                val_metrics[2*ndx] = local_val_metrics[0].mean()
+                val_metrics[2*ndx] = local_val_metrics[0] / local_val_metrics[2].sum()
                 val_metrics[2*ndx + 1] = local_val_metrics[1].sum() / local_val_metrics[2].sum()
 
             val_metrics[-2] = loss / total
