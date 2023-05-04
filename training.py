@@ -214,9 +214,6 @@ class TinyImageNetTrainingApp:
             if self.args.scheduler_mode == 'onecycle':
                 self.scheduler.step()
 
-            if batch_ndx % 1000 == 0 and batch_ndx > 199:
-                log.info('E{} Training {}/{}'.format(epoch_ndx, batch_ndx, len(train_dl)))
-
         self.totalTrainingSamples_count += len(train_dl.dataset)
 
         return trnMetrics.to('cpu')
@@ -226,8 +223,7 @@ class TinyImageNetTrainingApp:
             self.model.eval()
             valMetrics = torch.zeros(2, len(val_dl), device=self.device)
 
-            if epoch_ndx == 1 or epoch_ndx % 10 == 0:
-                log.warning('E{} Validation ---/{} starting'.format(epoch_ndx, len(val_dl)))
+            log.warning('E{} Validation ---/{} starting'.format(epoch_ndx, len(val_dl)))
 
             for batch_ndx, batch_tuple in enumerate(val_dl):
                 _, accuracy = self.computeBatchLoss(

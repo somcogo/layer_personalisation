@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10, CIFAR100
 from torchvision.transforms import Compose, ToTensor, Normalize
 
-from .datasets import PascalVocAugmentedSegmentation
+from .datasets import PascalVocAugmentedSegmentation, QuickPascalVocAugmentedSegmentation
 
 data_path = 'data/'
 
@@ -36,9 +36,13 @@ def get_cifar100_datasets():
 
     return dataset, val_dataset
 
-def get_pascalvoc_datasets():
-    dataset = PascalVocAugmentedSegmentation(root_dir=data_path, split='train')
-    val_dataset = PascalVocAugmentedSegmentation(root_dir=data_path, split='val')
+def get_pascalvoc_datasets(use_hdf5=True):
+    if use_hdf5:
+        dataset = QuickPascalVocAugmentedSegmentation(data_dir=data_path, mode='trn')
+        val_dataset = QuickPascalVocAugmentedSegmentation(data_dir=data_path, mode='val')
+    else:
+        dataset = PascalVocAugmentedSegmentation(root_dir=data_path, split='train')
+        val_dataset = PascalVocAugmentedSegmentation(root_dir=data_path, split='val')
     return dataset, val_dataset
 
 
@@ -58,9 +62,10 @@ def get_cifar100_dl(partition, n_sites, batch_size):
     val_dl = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     return train_dl, val_dl
 
-def get_pascalvoc_dl(partition, n_sites, batch_size):
+def get_pascalvoc_dl(partition, n_sites, batch_size, use_hdf5=True):
+    print('using hdf5:', use_hdf5)
     if partition == 'regular':
-        dataset, val_dataset = get_pascalvoc_datasets()
+        dataset, val_dataset = get_pascalvoc_datasets(use_hdf5=use_hdf5)
 
     train_dl = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, drop_last=False)
     val_dl = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
