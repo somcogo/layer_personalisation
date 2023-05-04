@@ -8,9 +8,32 @@ import tarfile
 import numpy as np
 import scipy.io as sio
 from PIL import Image
+import torch
 from torch.utils.data import Dataset
 from torchvision.transforms import Compose, Resize, ToTensor, Normalize, InterpolationMode
 from pathlib import Path
+import h5py
+
+class QuickPascalVocAugmentedSegmentation(Dataset):
+    def __init__(self, data_dir, mode, data_idxs=None):
+        super().__init__()
+        file_path = os.path.join(data_dir, 'aug_pascalvoc_{}.hdf5'.format(mode))
+        hdf5_file = h5py.File(file_path, 'r')
+        self.image_ds = hdf5_file['data']
+        self.mask_ds = hdf5_file['mask']
+        self.target = np.array(hdf5_file['targets'], dtype=object)
+        if data_idxs is not None:
+            self.image_ds = self.image_ds[data_idxs]
+            self.mask_ds = self.mask_ds[data_idxs]
+            self.target_ds = self.target_ds[data_idxs]
+
+    def __len__(self):
+        return self.image_ds.shape[0]
+    
+    def __getitem__(self, index):
+        image = torch.from_numpy(np.array(self.image_ds[index]))
+        mask = torch.from_numpy(np.array(self.mask_ds[index])).to(dtype=torch.long)
+        return (image, mask)
 
 class PascalVocAugmentedSegmentation(Dataset):
 
