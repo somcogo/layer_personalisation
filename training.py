@@ -214,6 +214,9 @@ class TinyImageNetTrainingApp:
             if self.args.scheduler_mode == 'onecycle':
                 self.scheduler.step()
 
+            if batch_ndx % 1000 == 0 and batch_ndx > 199:
+                log.info('E{} Training {}/{}'.format(epoch_ndx, batch_ndx, len(train_dl)))
+
         self.totalTrainingSamples_count += len(train_dl.dataset)
 
         return trnMetrics.to('cpu')
@@ -239,7 +242,7 @@ class TinyImageNetTrainingApp:
     def computeBatchLoss(self, batch_ndx, batch_tup, metrics, mode):
         batch, labels = batch_tup
         batch = batch.to(device=self.device, non_blocking=True)
-        labels = labels.to(device=self.device, non_blocking=True).squeeze()
+        labels = labels.to(device=self.device, non_blocking=True).squeeze(dim=1)
 
         if mode == 'trn':
             assert self.args.aug_mode in ['classification', 'segmentation']
