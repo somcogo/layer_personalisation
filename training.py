@@ -290,7 +290,7 @@ class LayerPersonalisationTrainingApp:
     def computeBatchLoss(self, batch_ndx, batch_tup, model, metrics, mode):
         batch, labels = batch_tup
         batch = batch.to(device=self.device, non_blocking=True)
-        labels = labels.to(device=self.device, non_blocking=True).squeeze()
+        labels = labels.to(device=self.device, non_blocking=True).squeeze(dim=1)
 
         if mode == 'trn':
             assert self.args.aug_mode in ['classification', 'segmentation']
