@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from models.model import ResNet18Model, ResNet34Model, TinySwin, SmallSwin, LargeSwin, UnetWithResNet34
 from utils.logconf import logging
-from utils.data_loader import get_cifar10_dl, get_cifar100_dl, get_pascal_voc_dl
+from utils.data_loader import get_cifar10_dl, get_cifar100_dl, get_pascal_voc_dl, get_dl_lists
 from utils.ops import aug_image, batch_miou
 
 log = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ log.setLevel(logging.INFO)
 # log.setLevel(logging.DEBUG)
 
 class LayerPersonalisationTrainingApp:
-    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None, save_model=None):
+    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None, save_model=None, partition=None, alpha=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
 
@@ -41,6 +41,8 @@ class LayerPersonalisationTrainingApp:
         parser.add_argument("--aug_mode", default='segmentation', type=str, help="mode of data augmentation")
         parser.add_argument("--scheduler_mode", default=None, type=str, help="choice of LR scheduler")
         parser.add_argument("--save_model", default=False, type=bool, help="save models during training")
+        parser.add_argument("--partition", default='regular', type=str, help="how to partition the data among sites")
+        parser.add_argument("--alpha", default=None, type=float, help="alpha used for the Dirichlet distribution")
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
 
         self.args = parser.parse_args()
@@ -74,6 +76,10 @@ class LayerPersonalisationTrainingApp:
             self.args.scheduler_mode = scheduler_mode
         if save_model is not None:
             self.args.save_model = save_model
+        if partition is not None:
+            self.args.partition = partition
+        if alpha is not None:
+            self.args.alpha = alpha
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
@@ -148,23 +154,24 @@ class LayerPersonalisationTrainingApp:
         return schedulers
 
     def initDls(self):
-        trn_dls = []
-        val_dls = []
-        for ndx in range(self.args.site_number):
-            if self.args.dataset == 'cifar10':
-                log.debug('using cifar10')
-                # TODO: site_id
-                trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
-                # trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
-            elif self.args.dataset == 'cifar100':
-                log.debug('using cifar100')
-                trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
-                # trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
-            elif self.args.dataset == 'pascalvoc':
-                trn_dl, val_dl = get_pascal_voc_dl(partition='regular', n_site=1, batch_size=self.args.batch_size)
-                # trn_dl, val_dl = get_pascal_voc_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
-            trn_dls.append(trn_dl)
-            val_dls.append(val_dl)
+        trn_dls, val_dls = get_dl_lists(dataset=self.args.dataset, partition=self.args.partition, n_site=self.args.site_number, batch_size=self.args.batch_size, alpha=self.args.alpha)
+        # trn_dls = []
+        # val_dls = []
+        # for ndx in range(self.args.site_number):
+        #     if self.args.dataset == 'cifar10':
+        #         log.debug('using cifar10')
+        #         # TODO: site_id
+        #         trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
+        #         # trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
+        #     elif self.args.dataset == 'cifar100':
+        #         log.debug('using cifar100')
+        #         trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
+        #         # trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
+        #     elif self.args.dataset == 'pascalvoc':
+        #         trn_dl, val_dl = get_pascal_voc_dl(partition='regular', n_site=1, batch_size=self.args.batch_size)
+        #         # trn_dl, val_dl = get_pascal_voc_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
+        #     trn_dls.append(trn_dl)
+        #     val_dls.append(val_dl)
         return trn_dls, val_dls
 
     def initTensorboardWriters(self):
@@ -290,7 +297,7 @@ class LayerPersonalisationTrainingApp:
     def computeBatchLoss(self, batch_ndx, batch_tup, model, metrics, mode):
         batch, labels = batch_tup
         batch = batch.to(device=self.device, non_blocking=True)
-        labels = labels.to(device=self.device, non_blocking=True).squeeze(dim=1)
+        labels = labels.to(device=self.device, non_blocking=True).squeeze(dim=1).to(dtype=torch.long)
 
         if mode == 'trn':
             assert self.args.aug_mode in ['classification', 'segmentation']
