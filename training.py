@@ -23,7 +23,7 @@ log.setLevel(logging.INFO)
 # log.setLevel(logging.DEBUG)
 
 class LayerPersonalisationTrainingApp:
-    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None, save_model=None, partition=None, alpha=None):
+    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None, save_model=None, partition=None, alpha=None, background_weight=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
 
@@ -44,6 +44,7 @@ class LayerPersonalisationTrainingApp:
         parser.add_argument("--save_model", default=False, type=bool, help="save models during training")
         parser.add_argument("--partition", default='regular', type=str, help="how to partition the data among sites")
         parser.add_argument("--alpha", default=None, type=float, help="alpha used for the Dirichlet distribution")
+        parser.add_argument("--background_weight", default=1, type=float, help="weight of background in XE loss")
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
 
         self.args = parser.parse_args()
@@ -81,6 +82,8 @@ class LayerPersonalisationTrainingApp:
             self.args.partition = partition
         if alpha is not None:
             self.args.alpha = alpha
+        if background_weight is not None:
+            self.args.background_weight = background_weight
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
@@ -308,7 +311,7 @@ class LayerPersonalisationTrainingApp:
         pred_label = torch.argmax(pred, dim=1)
         if self.args.aug_mode == 'segmentation':
             weight = torch.ones(21, device=self.device, dtype=torch.float)
-            weight[0] -= 0.5
+            weight[0] *= self.args.background_weight
         else:
             weight = None
         loss_fn = nn.CrossEntropyLoss(weight=weight)
