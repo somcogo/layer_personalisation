@@ -24,7 +24,7 @@ def partition_by_class(data_dir, dataset, n_sites):
     y_test = test_ds.targets
 
     if dataset == "cifar10":
-        num = 2
+        num = 5
         K = 10
     elif dataset == "cifar100":
         num = 20
