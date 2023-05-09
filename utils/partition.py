@@ -2,8 +2,6 @@ from collections import defaultdict
 import random
 
 import numpy as np
-from fedml.data.cifar10.data_loader import partition_data as cifar10_partition
-from fedml.data.cifar100.data_loader import partition_data as cifar100_partition
 
 from .datasets import get_cifar10_datasets, get_cifar100_datasets, get_pascal_voc_datasets
 
@@ -26,7 +24,7 @@ def partition_by_class(data_dir, dataset, n_sites):
     y_test = test_ds.targets
 
     if dataset == "cifar10":
-        num = 2
+        num = 5
         K = 10
     elif dataset == "cifar100":
         num = 20

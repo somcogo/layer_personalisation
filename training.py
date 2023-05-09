@@ -11,10 +11,11 @@ from torch.optim import Adam, AdamW, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
 from torch.utils.tensorboard import SummaryWriter
 
-from models.model import ResNet18Model, ResNet34Model, TinySwin, SmallSwin, LargeSwin, UnetWithResNet34
+from models.model import ResNet18Model, ResNet34Model, TinySwin, SmallSwin, LargeSwin, UnetWithResNet34, ResNetWithEmbeddings
 from utils.logconf import logging
-from utils.data_loader import get_cifar10_dl, get_cifar100_dl, get_pascal_voc_dl, get_dl_lists
+from utils.data_loader import get_dl_lists
 from utils.ops import aug_image, batch_miou
+from utils.merge_strategies import get_layer_list
 
 log = logging.getLogger(__name__)
 # log.setLevel(logging.WARN)
@@ -22,7 +23,7 @@ log.setLevel(logging.INFO)
 # log.setLevel(logging.DEBUG)
 
 class LayerPersonalisationTrainingApp:
-    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None, save_model=None, partition=None, alpha=None):
+    def __init__(self, sys_argv=None, epochs=None, batch_size=None, logdir=None, lr=None, comment=None, dataset='cifar10', site_number=5, model_name=None, optimizer_type=None, scheduler_mode=None, label_smoothing=None, T_max=None, pretrained=None, aug_mode=None, save_model=None, partition=None, alpha=None, strategy=None):
         if sys_argv is None:
             sys_argv = sys.argv[1:]
 
@@ -43,6 +44,7 @@ class LayerPersonalisationTrainingApp:
         parser.add_argument("--save_model", default=False, type=bool, help="save models during training")
         parser.add_argument("--partition", default='regular', type=str, help="how to partition the data among sites")
         parser.add_argument("--alpha", default=None, type=float, help="alpha used for the Dirichlet distribution")
+        parser.add_argument("--strategy", default='all', type=str, help="merging strategy")
         parser.add_argument('comment', help="Comment suffix for Tensorboard run.", nargs='?', default='dwlpt')
 
         self.args = parser.parse_args()
@@ -80,6 +82,8 @@ class LayerPersonalisationTrainingApp:
             self.args.partition = partition
         if alpha is not None:
             self.args.alpha = alpha
+        if strategy is not None:
+            self.args.strategy = strategy
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
         self.use_cuda = torch.cuda.is_available()
         self.device = 'cuda' if self.use_cuda else 'cpu'
@@ -115,6 +119,8 @@ class LayerPersonalisationTrainingApp:
                 model = LargeSwin(num_classes=num_classes, pretrained=self.args.pretrained)
             elif self.args.model_name == 'unetresnet34':
                 model = UnetWithResNet34(num_classes=num_classes, pretrained=self.args.pretrained)
+            elif self.args.model_name == 'resnet34emb':
+                model = ResNetWithEmbeddings(num_classes=num_classes)
             models.append(model)
         if self.use_cuda:
             log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
@@ -217,6 +223,9 @@ class LayerPersonalisationTrainingApp:
                     scheduler.step()
                     # log.debug(self.scheduler.get_last_lr())
 
+            if self.args.site_number > 0:
+                self.mergeModels()
+
         if hasattr(self, 'trn_writer'):
             self.trn_writer.close()
             self.val_writer.close()
@@ -296,8 +305,11 @@ class LayerPersonalisationTrainingApp:
 
     def computeBatchLoss(self, batch_ndx, batch_tup, model, metrics, mode):
         batch, labels = batch_tup
-        batch = batch.to(device=self.device, non_blocking=True)
-        labels = labels.to(device=self.device, non_blocking=True).squeeze(dim=1).to(dtype=torch.long)
+        if self.args.dataset == 'pascalvoc':
+            batch = batch.to(device=self.device, non_blocking=True)
+        else:
+            batch = batch.to(device=self.device, non_blocking=True).permute(0, 3, 1, 2).float()
+        labels = labels.to(device=self.device, non_blocking=True).to(dtype=torch.long)
 
         if mode == 'trn':
             assert self.args.aug_mode in ['classification', 'segmentation']
@@ -405,6 +417,19 @@ class LayerPersonalisationTrainingApp:
             shutil.copyfile(file_path, best_path)
 
             log.debug("Saved model params to {}".format(best_path))
+
+    def mergeModels(self):
+        layer_list = get_layer_list(model=self.args.model_name, strategy=self.args.strategy)
+        state_dicts = [model.state_dict() for model in self.models]
+        param_dict = {layer: torch.zeros(state_dicts[0][layer].shape, device=self.device) for layer in layer_list}
+
+        for layer in layer_list:
+            for state_dict in state_dicts:
+                param_dict[layer] += state_dict[layer]
+            param_dict[layer] /= len(state_dicts)
+
+        for model in self.models:
+            model.load_state_dict(param_dict, strict=False)
 
 if __name__ == '__main__':
     LayerPersonalisationTrainingApp().main()
