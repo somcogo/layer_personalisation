@@ -10,6 +10,7 @@ import torch.nn as nn
 from torch.optim import Adam, AdamW, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
 from torch.utils.tensorboard import SummaryWriter
+import torchvision
 
 from models.model import ResNet18Model, ResNet34Model, TinySwin, SmallSwin, LargeSwin, UnetWithResNet34
 from utils.logconf import logging
@@ -203,8 +204,8 @@ class LayerPersonalisationTrainingApp:
             self.logMetrics(epoch_ndx, 'trn', trn_metrics)
 
             if epoch_ndx == 1 or epoch_ndx % validation_cadence == 0:
-                val_metrics, accuracy = self.doValidation(epoch_ndx, val_dls)
-                self.logMetrics(epoch_ndx, 'val', val_metrics)
+                val_metrics, accuracy, imgs = self.doValidation(epoch_ndx, val_dls)
+                self.logMetrics(epoch_ndx, 'val', val_metrics, imgs)
                 saving_criterion = max(accuracy, saving_criterion)
 
                 if self.args.save_model:
@@ -235,7 +236,7 @@ class LayerPersonalisationTrainingApp:
             for batch_ndx, batch_tuple in enumerate(trn_dl):
                 self.optims[ndx].zero_grad()
 
-                loss, _ = self.computeBatchLoss(
+                loss, _, _ = self.computeBatchLoss(
                     batch_ndx,
                     batch_tuple,
                     self.models[ndx],
@@ -275,7 +276,7 @@ class LayerPersonalisationTrainingApp:
                 local_val_metrics = torch.zeros(3, len(val_dl), device=self.device)
 
                 for batch_ndx, batch_tuple in enumerate(val_dl):
-                    _, accuracy = self.computeBatchLoss(
+                    _, accuracy, imgs = self.computeBatchLoss(
                         batch_ndx,
                         batch_tuple,
                         self.models[ndx],
@@ -292,7 +293,7 @@ class LayerPersonalisationTrainingApp:
             val_metrics[-2] = loss / total
             val_metrics[-1] = correct / total
 
-        return val_metrics.to('cpu'), correct / total
+        return val_metrics.to('cpu'), correct / total, imgs
 
     def computeBatchLoss(self, batch_ndx, batch_tup, model, metrics, mode):
         batch, labels = batch_tup
@@ -305,7 +306,12 @@ class LayerPersonalisationTrainingApp:
 
         pred = model(batch)
         pred_label = torch.argmax(pred, dim=1)
-        loss_fn = nn.CrossEntropyLoss(label_smoothing=self.args.label_smoothing)
+        if self.args.aug_mode == 'segmentation':
+            weight = torch.ones(21, device=self.device, dtype=torch.float)
+            weight[0] -= 0.5
+        else:
+            weight = None
+        loss_fn = nn.CrossEntropyLoss(weight=weight)
         loss = loss_fn(pred, labels)
 
         metrics[0, batch_ndx] = loss.detach()
@@ -322,13 +328,28 @@ class LayerPersonalisationTrainingApp:
 
             metrics[1, batch_ndx] = accuracy.sum()
 
-        return loss.mean(), accuracy
+        if mode == 'val' and self.args.aug_mode == 'segmentation':
+            val_mean = torch.tensor([0.4561, 0.4353, 0.4013], device=self.device)
+            val_std = torch.tensor([0.2657, 0.2625, 0.2771], device=self.device)
+            original_img = batch[0].permute(1, 2, 0)
+            original_img = original_img*val_std + val_mean
+            original_img = original_img.permute(2, 0, 1)
+            predicted_mask = pred_label[0]
+            predicted_mask = torch.stack([predicted_mask, predicted_mask, predicted_mask], dim=0)
+            original_mask = labels[0]
+            original_mask = torch.stack([original_mask, original_mask, original_mask], dim=0)
+            imgs = [original_img, predicted_mask, original_mask]
+        else:
+            imgs = None
+
+        return loss.mean(), accuracy, imgs
 
     def logMetrics(
         self,
         epoch_ndx,
         mode_str,
-        metrics
+        metrics,
+        imgs=None
     ):
         self.initTensorboardWriters()
 
@@ -358,6 +379,13 @@ class LayerPersonalisationTrainingApp:
             scalar_value=metrics[-1],
             global_step=epoch_ndx
         )
+        if imgs is not None:
+            grid = torchvision.utils.make_grid(imgs)
+            writer.add_image(
+                'images',
+                grid,
+                global_step=epoch_ndx,
+                dataformats='CHW')
         writer.flush()
 
     def saveModel(self, type_str, epoch_ndx, isBest=False):
