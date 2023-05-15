@@ -99,6 +99,8 @@ class LayerPersonalisationTrainingApp:
         self.totalTrainingSamples_count = 0
 
         self.models = self.initModels()
+        if self.args.site_number > 1:
+            self.mergeModels(is_init=True)
         self.optims = self.initOptimizers()
         self.schedulers = self.initSchedulers()
 
@@ -423,18 +425,23 @@ class LayerPersonalisationTrainingApp:
 
                 log.debug("Saved model params to {}".format(file_path))
 
-    def mergeModels(self):
-        layer_list = get_layer_list(model=self.args.model_name, strategy=self.args.strategy)
-        state_dicts = [model.state_dict() for model in self.models]
-        param_dict = {layer: torch.zeros(state_dicts[0][layer].shape, device=self.device) for layer in layer_list}
+    def mergeModels(self, is_init=False):
+        if is_init:
+            state_dict = self.models[0].state_dict()
+            for model in self.models:
+                model.load_state_dict(state_dict)
+        else:
+            layer_list = get_layer_list(model=self.args.model_name, strategy=self.args.strategy)
+            state_dicts = [model.state_dict() for model in self.models]
+            param_dict = {layer: torch.zeros(state_dicts[0][layer].shape, device=self.device) for layer in layer_list}
 
-        for layer in layer_list:
-            for state_dict in state_dicts:
-                param_dict[layer] += state_dict[layer]
-            param_dict[layer] /= len(state_dicts)
+            for layer in layer_list:
+                for state_dict in state_dicts:
+                    param_dict[layer] += state_dict[layer]
+                param_dict[layer] /= len(state_dicts)
 
-        for model in self.models:
-            model.load_state_dict(param_dict, strict=False)
+            for model in self.models:
+                model.load_state_dict(param_dict, strict=False)
 
 if __name__ == '__main__':
     LayerPersonalisationTrainingApp().main()
