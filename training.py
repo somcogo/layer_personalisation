@@ -397,11 +397,10 @@ class LayerPersonalisationTrainingApp:
                 file_path = os.path.join(
                     'saved_models',
                     self.args.logdir,
-                    '{}_{}_{}.{}.site{}.state'.format(
+                    '{}_{}_{}.site{}.state'.format(
                         type_str,
                         self.time_str,
                         self.args.comment,
-                        epoch_ndx,
                         ndx
                     )
                 )
