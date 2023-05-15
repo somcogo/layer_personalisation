@@ -165,23 +165,6 @@ class LayerPersonalisationTrainingApp:
 
     def initDls(self):
         trn_dls, val_dls = get_dl_lists(dataset=self.args.dataset, partition=self.args.partition, n_site=self.args.site_number, batch_size=self.args.batch_size, alpha=self.args.alpha)
-        # trn_dls = []
-        # val_dls = []
-        # for ndx in range(self.args.site_number):
-        #     if self.args.dataset == 'cifar10':
-        #         log.debug('using cifar10')
-        #         # TODO: site_id
-        #         trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
-        #         # trn_dl, val_dl = get_cifar10_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
-        #     elif self.args.dataset == 'cifar100':
-        #         log.debug('using cifar100')
-        #         trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size)
-        #         # trn_dl, val_dl = get_cifar100_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
-        #     elif self.args.dataset == 'pascalvoc':
-        #         trn_dl, val_dl = get_pascal_voc_dl(partition='regular', n_site=1, batch_size=self.args.batch_size)
-        #         # trn_dl, val_dl = get_pascal_voc_dl(partition='regular', n_sites=1, batch_size=self.args.batch_size, site_id=ndx)
-        #     trn_dls.append(trn_dl)
-        #     val_dls.append(val_dl)
         return trn_dls, val_dls
 
     def initTensorboardWriters(self):
@@ -218,7 +201,7 @@ class LayerPersonalisationTrainingApp:
                 saving_criterion = max(accuracy, saving_criterion)
 
                 if self.args.save_model:
-                    self.saveModel('imagenet', epoch_ndx, accuracy == saving_criterion)
+                    self.saveModel('layer_personalisation', epoch_ndx, accuracy == saving_criterion)
 
                 log.info('Epoch {} of {}, accuracy/miou {}'.format(epoch_ndx, self.args.epochs, accuracy))
             
@@ -227,7 +210,7 @@ class LayerPersonalisationTrainingApp:
                     scheduler.step()
                     # log.debug(self.scheduler.get_last_lr())
 
-            if self.args.site_number > 0:
+            if self.args.site_number > 1:
                 self.mergeModels()
 
         if hasattr(self, 'trn_writer'):
@@ -311,9 +294,10 @@ class LayerPersonalisationTrainingApp:
         batch, labels = batch_tup
         if self.args.dataset == 'pascalvoc':
             batch = batch.to(device=self.device, non_blocking=True)
+            labels = labels.to(device=self.device, non_blocking=True).squeeze(dim=1).to(dtype=torch.long)
         else:
             batch = batch.to(device=self.device, non_blocking=True).permute(0, 3, 1, 2).float()
-        labels = labels.to(device=self.device, non_blocking=True).to(dtype=torch.long)
+            labels = labels.to(device=self.device, non_blocking=True).to(dtype=torch.long)
 
         if mode == 'trn':
             assert self.args.aug_mode in ['classification', 'segmentation']
@@ -324,6 +308,8 @@ class LayerPersonalisationTrainingApp:
         if self.args.aug_mode == 'segmentation':
             weight = torch.ones(21, device=self.device, dtype=torch.float)
             weight[0] *= self.args.background_weight
+            if len(pred.shape) != len(batch.shape):
+                pred = pred.unsqueeze(dim=0)
         else:
             weight = None
         loss_fn = nn.CrossEntropyLoss(weight=weight)
@@ -344,16 +330,18 @@ class LayerPersonalisationTrainingApp:
             metrics[1, batch_ndx] = accuracy.sum()
 
         if mode == 'val' and self.args.aug_mode == 'segmentation':
+            img_number = min(5, batch.shape[0])
             val_mean = torch.tensor([0.4561, 0.4353, 0.4013], device=self.device)
             val_std = torch.tensor([0.2657, 0.2625, 0.2771], device=self.device)
-            original_img = batch[0].permute(1, 2, 0)
+            original_img = batch[0:img_number].permute(0, 2, 3, 1)
             original_img = original_img*val_std + val_mean
-            original_img = original_img.permute(2, 0, 1)
-            predicted_mask = pred_label[0]
-            predicted_mask = torch.stack([predicted_mask, predicted_mask, predicted_mask], dim=0)
-            original_mask = labels[0]
-            original_mask = torch.stack([original_mask, original_mask, original_mask], dim=0)
-            imgs = [original_img, predicted_mask, original_mask]
+            original_img = original_img.permute(0, 3, 1, 2)
+            predicted_mask = pred_label[0:img_number]
+            predicted_mask = torch.stack([predicted_mask, predicted_mask, predicted_mask], dim=1)
+            original_mask = labels[0:img_number]
+            original_mask = torch.stack([original_mask, original_mask, original_mask], dim=1)
+            # imgs = [original_img, predicted_mask, original_mask]
+            imgs = torch.cat([original_img, predicted_mask, original_mask], dim=0)
         else:
             imgs = None
 
@@ -395,7 +383,7 @@ class LayerPersonalisationTrainingApp:
             global_step=epoch_ndx
         )
         if imgs is not None:
-            grid = torchvision.utils.make_grid(imgs)
+            grid = torchvision.utils.make_grid(imgs, nrow=5)
             writer.add_image(
                 'images',
                 grid,
@@ -404,50 +392,37 @@ class LayerPersonalisationTrainingApp:
         writer.flush()
 
     def saveModel(self, type_str, epoch_ndx, isBest=False):
-        file_path = os.path.join(
-            'saved_models',
-            self.args.logdir,
-            '{}_{}_{}.{}.state'.format(
-                type_str,
-                self.time_str,
-                self.args.comment,
-                self.totalTrainingSamples_count
-            )
-        )
-
-        os.makedirs(os.path.dirname(file_path), mode=0o755, exist_ok=True)
-
-        model = self.model
-        if isinstance(model, torch.nn.DataParallel):
-            model = model.module
-
-        state = {
-            'model_state': model.state_dict(),
-            'model_name': type(model).__name__,
-            'optimizer_state': self.optimizer.state_dict(),
-            'optimizer_name': type(self.optimizer).__name__,
-            'epoch': epoch_ndx,
-            'totalTrainingSamples_count': self.totalTrainingSamples_count
-        }
-
-        torch.save(state, file_path)
-
-        log.debug("Saved model params to {}".format(file_path))
-
-        if isBest:
-            best_path = os.path.join(
-                'saved_models',
-                self.args.logdir,
-                '{}_{}_{}.{}.state'.format(
-                    type_str,
-                    self.time_str,
-                    self.args.comment,
-                    'best'
+        for ndx, model in enumerate(self.models):
+            if isBest:
+                file_path = os.path.join(
+                    'saved_models',
+                    self.args.logdir,
+                    '{}_{}_{}.{}.site{}.state'.format(
+                        type_str,
+                        self.time_str,
+                        self.args.comment,
+                        epoch_ndx,
+                        ndx
+                    )
                 )
-            )
-            shutil.copyfile(file_path, best_path)
 
-            log.debug("Saved model params to {}".format(best_path))
+                os.makedirs(os.path.dirname(file_path), mode=0o755, exist_ok=True)
+
+                if isinstance(model, torch.nn.DataParallel):
+                    model = model.module
+
+                state = {
+                    'model_state': model.state_dict(),
+                    'model_name': type(model).__name__,
+                    'optimizer_state': self.optims[0].state_dict(),
+                    'optimizer_name': type(self.optims[0]).__name__,
+                    'epoch': epoch_ndx,
+                    'totalTrainingSamples_count': self.totalTrainingSamples_count
+                }
+
+                torch.save(state, file_path)
+
+                log.debug("Saved model params to {}".format(file_path))
 
     def mergeModels(self):
         layer_list = get_layer_list(model=self.args.model_name, strategy=self.args.strategy)

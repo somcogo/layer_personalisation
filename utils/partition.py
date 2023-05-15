@@ -24,14 +24,14 @@ def partition_by_class(data_dir, dataset, n_sites):
     y_test = test_ds.targets
 
     if dataset == "cifar10":
-        num = 5
         K = 10
+        num = K // n_sites
     elif dataset == "cifar100":
-        num = 20
         K = 100
+        num = K // n_sites
     elif dataset == 'pascalvoc':
-        num = 4
         K = 20
+        num = K // n_sites
 
     # -------------------------------------------#
     # Divide classes + num samples for each user #
