@@ -306,6 +306,8 @@ class LayerPersonalisationTrainingApp:
             batch, labels = aug_image(batch, labels, self.args.aug_mode)
 
         pred = model(batch)
+        if self.args.aug_mode == 'segmentation' and len(pred.shape) == 3:
+            pred = pred.unsqueeze(dim=0)
         pred_label = torch.argmax(pred, dim=1)
         if self.args.aug_mode == 'segmentation':
             weight = torch.ones(21, device=self.device, dtype=torch.float)
