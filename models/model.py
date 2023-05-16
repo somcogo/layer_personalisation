@@ -79,7 +79,7 @@ class LargeSwin(nn.Module):
         return out
     
 class UnetWithResNet34(nn.Module):
-    def __init__(self, num_classes, pretrained):
+    def __init__(self, num_classes, pretrained=False):
         super().__init__()
         if pretrained:
             weights = 'imagenet'
